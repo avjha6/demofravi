@@ -1,0 +1,93 @@
+to run your playbook you need some user so that you can copy that user's public key to remote host.
+if you dont want to create a user , you can generate the public key for ec2-user.
+however here we are craeting a new user- name devops in the master node
+useradd -m -s /bin/bash devops
+passwd devops
+Add the user in sudoers.d file, this allow user to run any command using sudo without passing their password.
+echo -e ‘devops\tALL=(ALL)\tNOPASSWD:\tALL’ > /etc/sudoers.d/devops
+user devops created successfully.
+Login as a devops user and run following cmd
+ssh-keygen -t rsa
+so once you run the above command one .ssh folder will be created inside home directory of logged in user automatically & within that id_rsa and id_rsa.pub will be created 
+It will generate the public and private key file for the devops user.
+Now we have to add this public key to all the remote hosts.
+copy the id_rsa.pub file to your git repo or anywhere on the master server so that you can refer that in your playbook
+If you try to run the below command as ec2-user and devops you will get the error “Permission Denied” because we have not copied the public key to the remote hosts yet
+ssh -i ~/.ssh/id_rsa <ipoftheslave/clientserver>
+so to fix the issue we Install git and clone the git repo
+sudo yum install git
+git clone https://github.com/devops4solutions/Ansible-Sample-Application-Deployment.git
+so now when you cloned the git repo all folders are there inside the folder "Ansible-Sample-Application-Deployment"
+we will create one more file inside this folder with name "ansible_aut.pem" and copy the content of .pem file we generated as  keypair when starting the master and slave ec2 instances.
+cd Ansible-Sample-Application-Deployment/
+vi ansible_aut.pem
+Also here we are assumming that keypair that we used to create master node was same for slave ec2 node.
+so now you need to change the permission as well for ansible_aut.pem file
+sudo chmod 600 ansible_aut.pem
+You need to use the .pem file to connect initially to other server so now run the below command 
+But before running the above command please add remote server in your inventory file
+ansible-playbook main.yml -i inventories/dev/hosts --user ec2-user --key-file ansible_aut.pem -e '@configs/dev.yml'
+so in the above command inside the inventory file i.e inventories/dev/hosts we put the remote host name and mentioned the pem file and also config file where we have password.
+now if you try to try to ssh to another ec2 you'be able to do that
+ssh -i ~/.ssh/id_rsa 172.31.23.102
+
+
+
+**********************
+How to run a ansible playbook with roles.
+so first outside you have "main.yml" file where you have the code to call the roles which are defined inisde "roles" folder.
+so here main.yml code looks like below where "include_role" parameter is calling the roles
+********
+---
+
+- hosts: all
+  become: true
+  become_user: root
+  gather_facts: false
+  tasks:
+    - include_role:
+        name: add_devops_user
+        tasks_from: add_user.yml
+*****
+now if you go inside "roles" folder you'll find another folder named "add_devops_user" and inside that you'll find two folders 
+again i.e "handlers" & "tasks" and inside "tasks" folder you'll see the file "add_user.yml" whih we mentioneed above.
+content of add_user.yml file is nentioned below:
+*******
+ 
+   - name: Add a new user named devops
+     user:
+          name={{username}}
+          password={{ devops_password }}
+ 
+   - name: Add devops user to the sudoers
+     copy:
+          dest: "/etc/sudoers.d/{{username}}"
+          content: "{{username}}  ALL=(ALL)  NOPASSWD: ALL"
+ 
+   - name: Deploy SSH Key
+     authorized_key: user={{username}}
+                     key="{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+                     state=present
+                     
+   - name: Disable Password Authentication
+     lineinfile:
+           dest=/etc/ssh/sshd_config
+           regexp='^PasswordAuthentication'
+           line="PasswordAuthentication no"
+           state=present
+           backup=yes
+
+   - name: Disable Root Login
+     lineinfile:
+           dest=/etc/ssh/sshd_config
+           regexp='^PermitRootLogin'
+           line="PermitRootLogin no"
+           state=present
+           backup=yes
+           
+     notify:
+        - restart ssh
+
+*******
+
+ 
